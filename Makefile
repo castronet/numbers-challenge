@@ -12,5 +12,6 @@ vendor:
 
 clean:
 	rm main
+	rm numbers.log
 
 build: main
