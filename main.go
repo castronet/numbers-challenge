@@ -15,7 +15,7 @@ import (
 * TPC/IP v4
 * Manage concurrent users with netutil // option to create a semaphore to do that
 * Channels for communication between go routines
-* 
+*
  */
 
 func main() {
@@ -37,7 +37,7 @@ func main() {
 	uniqueNumbers := 0
 
 	// Open file where to write numbers
-	outputFile, err := os.OpenFile("./numbers.txt", os.O_RDWR|os.O_CREATE, 0666)
+	outputFile, err := os.OpenFile("./numbers.log", os.O_RDWR|os.O_CREATE, 0666)
 	checkError(err)
 	defer outputFile.Close()
 
@@ -52,10 +52,25 @@ func main() {
 	// Define maximun concurrent users on our listener
 	listener = netutil.LimitListener(listener, maxConcurrentUsers)
 
-    // Run go routine to handle the input numbers
+	// [+] Routines execution
+	// Run go routine to handle client connections
+	go func() {
+		// Client bucle, accept clients
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				continue
+			}
+
+			// Handle clients in a gorouting
+			go handleClient(conn, input, system)
+		}
+	}()
+
+	// Run go routine to handle the input numbers
 	go func() {
 		for newNumber := range input {
-			// Lock to avid conflicts
+			// Lock to avoid conflicts
 			mutex.Lock()
 			if _, ok := numbers[newNumber]; ok {
 				duplicatedNumbers++
@@ -74,21 +89,7 @@ func main() {
 		}
 	}()
 
-    // Run go routine to handle client connections
-	go func() {
-		// Client bucle
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				continue
-			}
-
-			// Handle clients in a gorouting
-			go handleClient(conn, input, system)
-		}
-	}()
-
-    // Run go routine to handle output messages
+	// Run go routine to handle output messages
 	go func() {
 		tick := time.Tick(10 * time.Second)
 		for range tick {
@@ -104,13 +105,15 @@ func main() {
 		}
 	}()
 
-    // Termination part
+	// Termination part
 	<-system
 	close(system)
-    outputFile.Close()
+	// Try to close all active connections
 	listener.Close()
+	// close file after listerner
+	outputFile.Close()
 
-    // Exit application with no-errors return code
+	// Exit application with no-errors return code
 	os.Exit(0)
 }
 
@@ -131,12 +134,13 @@ func handleClient(conn net.Conn, input chan int, system chan interface{}) {
 		i, err := strconv.Atoi(line)
 		if err != nil {
 			if line == "terminate" {
+				// If we receive a "terminate" command, shut down
 				system <- struct{}{}
-			} else {
-				conn.Close()
-                return
 			}
-		} else {
+			conn.Close()
+			return
+		} else if i > 0 {
+			// Parse the number if it is a number, has the correct length, and it is greater than 0
 			input <- i
 		}
 	}
